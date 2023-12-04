@@ -66,7 +66,7 @@ object ReadFromKafka {
               val windSpeed = windSpeedRow.get(0).getAs[Double]("wind_mph")
 
               if (windSpeed > 8.0) {
-                sendEmailAlert("levinajariwala@gmail.com", "High Wind Alert", "High wind speed detected!")
+                sendEmailAlert("amro.yas22@gmail.com", "High Wind Alert", "High wind speed detected!")
                 println("High wind speed detected!")
               }
             }
@@ -106,13 +106,13 @@ object ReadFromKafka {
 
     val session = Session.getInstance(properties, new javax.mail.Authenticator() {
       override protected def getPasswordAuthentication(): PasswordAuthentication = {
-        new PasswordAuthentication("15mscit026@gmail.com", "zvqm ctzt izma xkaa")
+        new PasswordAuthentication("al-yasiry@windowslive.com", "zvqm ctzt izma xkaa")
       }
     })
 
     try {
       val message = new MimeMessage(session)
-      message.setFrom(new InternetAddress("15mscit026@gmail.com"))
+      message.setFrom(new InternetAddress("al-yasiry@windowslive.com"))
       message.addRecipient(Message.RecipientType.TO, new InternetAddress(recipient))
       message.setSubject(subject)
       message.setText(body)
