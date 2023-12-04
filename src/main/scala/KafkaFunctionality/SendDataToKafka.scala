@@ -1,124 +1,129 @@
 package KafkaFunctionality
 
+import okhttp3.{OkHttpClient, Request}
 import org.apache.spark.sql.functions._
-import org.apache.spark.sql.streaming.Trigger
-import org.apache.spark.sql.types.{DoubleType, StringType, StructField, StructType}
+import org.apache.spark.sql.types._
 import org.apache.spark.sql.{DataFrame, SparkSession}
 
-import javax.mail._
-import javax.mail.internet._
+import java.time.{LocalDateTime, ZoneId}
+import java.time.format.DateTimeFormatter
 
-object ReadFromKafka {
+object SendDataToKafka {
   def main(args: Array[String]): Unit = {
-    val spark = SparkSession.builder().appName("KafkaToJson").master("local[*]").getOrCreate()
+    val spark = SparkSession.builder()
+      .appName("My Spark Application")
+      .master("local[*]")
+      .getOrCreate()
+    while (true) {
+      val client = new OkHttpClient()
 
-    val kafkaParams = Map[String, Object](
-      "bootstrap.servers" -> "ip-172-31-3-80.eu-west-2.compute.internal:9092",
-      "key.deserializer" -> "org.apache.kafka.common.serialization.StringDeserializer",
-      "value.deserializer" -> "org.apache.kafka.common.serialization.StringDeserializer",
-      "group.id" -> "group1",
-      "auto.offset.reset" -> "earliest",
-      "enable.auto.commit" -> (false: java.lang.Boolean)
-    )
+      println("60")
+      val city = "london"
+      val endpoint = buildEndpoint1(city)
+      val request = new Request.Builder()
+        .url(s"https://weatherapi-com.p.rapidapi.com/$endpoint")
+        .get()
+        .addHeader("X-RapidAPI-Key", "2467bc2bd9mshfd02cfd8d4e5a77p13ba22jsn5eecabaf967e")
+        .addHeader("X-RapidAPI-Host", "weatherapi-com.p.rapidapi.com")
+        .build();
 
-    val topic = "weather_forecast_kafka"
-
-    val schema = StructType(Seq(
-      StructField("wind_mph", DoubleType, nullable = true),
-      StructField("localtime", StringType, nullable = true) // Change to StringType as per the data received
-    ))
-
-    val df = spark.readStream
-      .format("kafka")
-      .option("kafka.bootstrap.servers", "ip-172-31-3-80.eu-west-2.compute.internal:9092")
-      .option("subscribe", topic)
-      .option("startingOffsets", "earliest")
-      .load()
-      .selectExpr("CAST(value AS STRING)")
-      .select(from_json(col("value"), schema).as("data"))
-      .selectExpr("data.*")
-      .withColumn("is_alert", when(col("wind_mph") > 8.0, 1).otherwise(0))
+      val response = client.newCall(request).execute();
+      val responseBody = response.body().string()
+      print(responseBody)
 
 
-    import spark.implicits._
+      val schema = StructType(
+        Array(
+          StructField("location", StructType(
+            Array(
+              StructField("name", StringType),
+              StructField("region", StringType),
+              StructField("country", StringType),
+              StructField("lat", DoubleType),
+              StructField("lon", DoubleType),
+              StructField("tz_id", StringType),
+              StructField("localtime_epoch", LongType),
+              StructField("localtime", StringType)
+            )
+          )),
+          StructField("current", StructType(
+            Array(
+              StructField("last_updated_epoch", LongType),
+              StructField("last_updated", StringType),
+              StructField("temp_c", DoubleType),
+              StructField("temp_f", DoubleType),
+              StructField("is_day", IntegerType),
+              StructField("condition", StructType(
+                Array(
+                  StructField("text", StringType),
+                  StructField("icon", StringType),
+                  StructField("code", IntegerType)
+                )
+              )),
+              StructField("wind_mph", DoubleType),
+              StructField("wind_kph", DoubleType),
+              StructField("wind_degree", IntegerType),
+              StructField("wind_dir", StringType),
+              StructField("pressure_mb", DoubleType),
+              StructField("pressure_in", DoubleType),
+              StructField("precip_mm", DoubleType),
+              StructField("precip_in", DoubleType),
+              StructField("humidity", IntegerType), // Extracting humidity
+              StructField("cloud", IntegerType),
+              StructField("feelslike_c", DoubleType),
+              StructField("feelslike_f", DoubleType),
+              StructField("vis_km", DoubleType),
+              StructField("vis_miles", DoubleType),
+              StructField("uv", DoubleType),
+              StructField("gust_mph", DoubleType),
+              StructField("gust_kph", DoubleType)
+            )
+          ))
+        )
+      )
+      import spark.implicits._
+      // Read JSON string as DataFrame using the defined schema
+      val dfFromText: DataFrame = spark.read.schema(schema).json(Seq(responseBody).toDS)
+      println(dfFromText)
+      // Set the time zone to Europe/London
+      val londonZoneId = ZoneId.of("Europe/London")
+      // Fetch the London local time
+      val londonLocalTime = LocalDateTime.now(londonZoneId).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
 
-    val query = df.writeStream
-      .outputMode("append")
-      .format("console")
-      .trigger(Trigger.ProcessingTime("5 seconds"))
-      .foreachBatch { (batchDF: DataFrame, batchId: Long) =>
-        print("\n\n\n\n\n")
-        println("Entire Batch:")
-        batchDF.show(truncate = false)
-        print("\n\n\n\n\n")
-        if (!batchDF.isEmpty) {
-          val lastRecordDF = batchDF.orderBy($"localtime".desc).limit(1)
-          print("\n\n\n\n\n")
-          println("Last Record:")
-          lastRecordDF.show(truncate = false)
-          print("\n\n\n\n\n")
+      // Selecting required fields and extracting wind and humidity
+      val extractedDF = dfFromText.select(
+        $"current.wind_mph".alias("wind_mph"),
+        lit(londonLocalTime).alias("localtime")
+      )
 
-          if (!lastRecordDF.isEmpty) {
-            val windSpeedRow = lastRecordDF.select("wind_mph").collectAsList()
-
-            if (!windSpeedRow.isEmpty) {
-              val windSpeed = windSpeedRow.get(0).getAs[Double]("wind_mph")
-
-              if (windSpeed > 8.0) {
-                sendEmailAlert("levinajariwala@gmail.com", "High Wind Alert", "High wind speed detected!")
-                println("High wind speed detected!")
-              }
-            }
-          }
-        }
-        // Insert processed data into Hive table
-        //        batchDF.write
-        ////          .format("hive")
-        //          .mode("append")
-        //          .insertInto("bduk_test1.wind_info") // Replace with your Hive table name
-        // Filter the DataFrame to get unique records based on 'localtime'
-        val existingLocalTimes = spark.sql("SELECT DISTINCT localtime FROM bduk_test1.wind_info") // Get existing localtime values
-
-        val uniqueRecords = batchDF
-          .join(existingLocalTimes, batchDF("localtime") === existingLocalTimes("localtime"), "left_anti") // Filter out existing localtimes
-          .drop(existingLocalTimes("localtime")) // Drop the additional column added by join
-
-        // Write the unique records to the Hive table
-        uniqueRecords.write
-          .mode("append")
-          .insertInto("bduk_test1.wind_info")
-      }
-      .start()
+      // Assuming you want to create a messageDF with specific columns and pass wind and humidity
+      val messageDF = extractedDF.select(
+        $"wind_mph",$"localtime")
 
 
+      val kafkaServer: String = "ip-172-31-3-80.eu-west-2.compute.internal:9092"
+      val topicSampleName: String = "y_w_f"
+      println("63")
+      messageDF.show()
+      // Assuming messageDF contains 'wind_mph' and 'humidity' columns
+      val formattedDF = messageDF.withColumn("value", to_json(struct($"wind_mph",$"localtime")))
 
+      formattedDF
+        .selectExpr("CAST(value AS STRING)")
+        .write
+        .format("kafka")
+        .option("kafka.bootstrap.servers", kafkaServer)
+        .option("topic", topicSampleName)
+        .save()
 
-    query.awaitTermination()
-  }
+      println("Message is loaded to Kafka topic!!")
+      Thread.sleep(60000) // Wait for 10 seconds before making the next call
 
-  def sendEmailAlert(recipient: String, subject: String, body: String): Unit = {
-    val properties = new java.util.Properties()
-    properties.put("mail.smtp.host", "smtp.gmail.com")
-    properties.put("mail.smtp.port", "587")
-    properties.put("mail.smtp.auth", "true")
-    properties.put("mail.smtp.starttls.enable", "true")
-
-    val session = Session.getInstance(properties, new javax.mail.Authenticator() {
-      override protected def getPasswordAuthentication(): PasswordAuthentication = {
-        new PasswordAuthentication("15mscit026@gmail.com", "zvqm ctzt izma xkaa")
-      }
-    })
-
-    try {
-      val message = new MimeMessage(session)
-      message.setFrom(new InternetAddress("15mscit026@gmail.com"))
-      message.addRecipient(Message.RecipientType.TO, new InternetAddress(recipient))
-      message.setSubject(subject)
-      message.setText(body)
-      Transport.send(message)
-      println("Email sent successfully!")
-    } catch {
-      case e: MessagingException => e.printStackTrace()
     }
   }
+
+  def buildEndpoint1(city: String): String = {
+    s"current.json?q=$city"
+  }
+
 }
