@@ -27,6 +27,7 @@ object SendDataToKafka {
         .addHeader("X-RapidAPI-Host", "weatherapi-com.p.rapidapi.com")
         .build();
 
+
       val response = client.newCall(request).execute();
       val responseBody = response.body().string()
       print(responseBody)
