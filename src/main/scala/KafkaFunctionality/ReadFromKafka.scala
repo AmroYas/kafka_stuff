@@ -22,7 +22,7 @@ object ReadFromKafka {
       "enable.auto.commit" -> (false: java.lang.Boolean)
     )
 
-    val topic = "weather_forecast_kafka"
+    val topic = "y_w_f"
 
     val schema = StructType(Seq(
       StructField("wind_mph", DoubleType, nullable = true),
