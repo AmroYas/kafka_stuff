@@ -65,7 +65,7 @@ object ReadFromKafka {
             if (!windSpeedRow.isEmpty) {
               val windSpeed = windSpeedRow.get(0).getAs[Double]("wind_mph")
 
-              if (windSpeed > 8.0) {
+              if (windSpeed > 6.8) {
                 sendEmailAlert("0xyasiro@gmail.com", "High Wind Alert", "High wind speed detected!")
                 println("High wind speed detected!")
               }
